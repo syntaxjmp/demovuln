@@ -3,6 +3,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const { execFile } = require('child_process');
 
 const app = express();
 app.use(express.json());
@@ -10,8 +11,8 @@ app.use(express.json());
 // ------------------------
 // Unsafe environment usage
 // ------------------------
-const SECRET_KEY = "SUPER_SECRET_KEY"; // ⚠️ Hardcoded secret
-process.env.API_TOKEN = "API_TOKEN_123"; // ⚠️ Unsafe env usage
+const SECRET_KEY = process.env.SECRET_KEY || "SUPER_SECRET_KEY"; // ⚠️ Hardcoded secret
+process.env.API_TOKEN = process.env.API_TOKEN || "API_TOKEN_123"; // ⚠️ Unsafe env usage
 
 // ------------------------
 // Vulnerable endpoints
@@ -39,16 +40,19 @@ app.post('/login', (req, res) => {
 app.get('/read', (req, res) => {
     const file = req.query.file;
     // ⚠️ Unsafe path handling
-    const content = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    const safePath = path.resolve(__dirname, file);
+    if (!safePath.startsWith(__dirname)) {
+        return res.status(400).send('Invalid file path');
+    }
+    const content = fs.readFileSync(safePath, 'utf8');
     res.send(`<pre>${content}</pre>`);
 });
 
 // 4. Command Injection simulation
-const { exec } = require('child_process');
 app.get('/exec', (req, res) => {
     const cmd = req.query.cmd;
     // ⚠️ Unsafe execution
-    exec(cmd, (err, stdout, stderr) => {
+    execFile(cmd, (err, stdout, stderr) => {
         if (err) return res.send(stderr);
         res.send(`<pre>${stdout}</pre>`);
     });
@@ -78,7 +82,7 @@ setInterval(() => {
 // Hardcoded API key in function
 // ------------------------
 function sendRequest() {
-    const apiKey = "HARD_CODED_API_KEY_456"; // ⚠️ Hardcoded secret
+    const apiKey = process.env.API_KEY || "HARD_CODED_API_KEY_456"; // ⚠️ Hardcoded secret
     axios.get(`https://api.example.com/data?key=${apiKey}`)
         .then(res => console.log(res.data))
         .catch(err => console.error(err));
