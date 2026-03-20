@@ -2,6 +2,7 @@
 from flask import Flask, request, jsonify
 import sqlite3
 import os
+import os
 
 app = Flask(__name__)
 
@@ -9,8 +10,8 @@ app = Flask(__name__)
 # Unsafe configuration
 # ------------------------
 # Example of secrets in code (should never do this in production)
-DB_PASSWORD = "SuperSecret123"
-API_KEY = "this-is-a-demo-key"
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "SuperSecret123")  # Moved to env variable
+API_KEY = os.environ.get("API_KEY", "this-is-a-demo-key")  # Moved to env variable
 
 # ------------------------
 # Vulnerable database setup
@@ -38,9 +39,9 @@ def login():
     password = request.form.get('password', '')
 
     # ⚠️ Vulnerable to SQL Injection
-    query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
+    query = "SELECT * FROM users WHERE username = ? AND password = ?"
     conn = get_db_connection()
-    user = conn.execute(query).fetchone()
+    user = conn.execute(query, (username, password)).fetchone()  # Use parameterized query
     conn.close()
 
     if user:
@@ -75,7 +76,7 @@ def read_file():
     filename = request.args.get('file', '')
     try:
         # ⚠️ Unsafe path handling
-        with open(f"./files/{filename}", "r") as f:
+        with open(os.path.join("files", filename), "r") as f:  # Use os.path.join for safety
             return f"<pre>{f.read()}</pre>"
     except FileNotFoundError:
         return "File not found", 404
