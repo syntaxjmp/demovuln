@@ -2,6 +2,7 @@
 from flask import Flask, request, jsonify
 import sqlite3
 import os
+import json
 
 app = Flask(__name__)
 
@@ -9,8 +10,8 @@ app = Flask(__name__)
 # Unsafe configuration
 # ------------------------
 # Example of secrets in code (should never do this in production)
-DB_PASSWORD = "SuperSecret123"
-API_KEY = "this-is-a-demo-key"
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "SuperSecret123")  # Moved to env variable
+API_KEY = os.environ.get("API_KEY", "this-is-a-demo-key")  # Moved to env variable
 
 # ------------------------
 # Vulnerable database setup
@@ -38,9 +39,9 @@ def login():
     password = request.form.get('password', '')
 
     # ⚠️ Vulnerable to SQL Injection
-    query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
+    query = "SELECT * FROM users WHERE username = ? AND password = ?"
     conn = get_db_connection()
-    user = conn.execute(query).fetchone()
+    user = conn.execute(query, (username, password)).fetchone()
     conn.close()
 
     if user:
@@ -59,7 +60,7 @@ def get_secret():
 def echo():
     msg = request.args.get('msg', '')
     # ⚠️ Unsafe output
-    return f"<h1>You said: {msg}</h1>"
+    return f"<h1>You said: {html.escape(msg)}</h1>"
 
 # 4. Command Injection
 @app.route('/ping')
@@ -75,18 +76,18 @@ def read_file():
     filename = request.args.get('file', '')
     try:
         # ⚠️ Unsafe path handling
-        with open(f"./files/{filename}", "r") as f:
+        safe_path = os.path.join("files", filename)
+        with open(safe_path, "r") as f:
             return f"<pre>{f.read()}</pre>"
     except FileNotFoundError:
         return "File not found", 404
 
 # 6. Insecure Deserialization
-import pickle
 @app.route('/deserialize', methods=['POST'])
 def deserialize():
     data = request.data
     try:
-        obj = pickle.loads(data)  # ⚠️ Arbitrary code execution possible
+        obj = json.loads(data)  # Replaced pickle with json for safety
         return jsonify({"message": "Object loaded", "obj": str(obj)})
     except Exception as e:
         return str(e), 400
