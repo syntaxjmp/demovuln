@@ -2,18 +2,21 @@
 from flask import Flask, request, jsonify
 import sqlite3
 import os
+import html
+import json
+import subprocess
+import re
 
 app = Flask(__name__)
 
 # ------------------------
-# Unsafe configuration
+# Configuration (use environment variables in production)
 # ------------------------
-# Example of secrets in code (should never do this in production)
-DB_PASSWORD = "SuperSecret123"
-API_KEY = "this-is-a-demo-key"
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "change-me")
+API_KEY = os.environ.get("API_KEY", "change-me")
 
 # ------------------------
-# Vulnerable database setup
+# Database setup
 # ------------------------
 def get_db_connection():
     conn = sqlite3.connect('demo.db')
@@ -28,19 +31,19 @@ conn.commit()
 conn.close()
 
 # ------------------------
-# Routes with vulnerabilities
+# Routes with security fixes
 # ------------------------
 
-# 1. SQL Injection
+# 1. SQL Injection - FIXED: Use parameterized queries
 @app.route('/login', methods=['POST'])
 def login():
     username = request.form.get('username', '')
     password = request.form.get('password', '')
 
-    # ⚠️ Vulnerable to SQL Injection
-    query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
+    # Fixed: parameterized query prevents SQL injection
+    query = "SELECT * FROM users WHERE username = ? AND password = ?"
     conn = get_db_connection()
-    user = conn.execute(query).fetchone()
+    user = conn.execute(query, (username, password)).fetchone()
     conn.close()
 
     if user:
@@ -48,53 +51,61 @@ def login():
     else:
         return jsonify({"message": "Invalid credentials"}), 401
 
-# 2. Exposed .env / secrets
+# 2. Exposed secrets - FIXED: removed direct exposure
 @app.route('/get_secret')
 def get_secret():
-    # ⚠️ Exposes sensitive API_KEY
-    return jsonify({"API_KEY": API_KEY})
+    return jsonify({"message": "Access denied"}), 403
 
-# 3. Cross-Site Scripting (XSS)
+# 3. Cross-Site Scripting (XSS) - FIXED: use html.escape
 @app.route('/echo')
 def echo():
     msg = request.args.get('msg', '')
-    # ⚠️ Unsafe output
-    return f"<h1>You said: {msg}</h1>"
+    safe_msg = html.escape(msg)
+    return f"<h1>You said: {safe_msg}</h1>"
 
-# 4. Command Injection
+# 4. Command Injection - FIXED: use subprocess with argument list
 @app.route('/ping')
 def ping():
     host = request.args.get('host', '')
-    # ⚠️ Unsafe use of os.system
-    result = os.popen(f"ping -c 1 {host}").read()
-    return f"<pre>{result}</pre>"
+    # Validate input: only allow hostnames and IPs
+    if not re.match(r'^[a-zA-Z0-9.\-]+$', host):
+        return "Invalid host", 400
+    try:
+        result = subprocess.run(["ping", "-c", "1", host], capture_output=True, text=True, timeout=5)
+        return f"<pre>{html.escape(result.stdout)}</pre>"
+    except subprocess.TimeoutExpired:
+        return "Timeout", 408
 
-# 5. File Disclosure / Path Traversal
+# 5. File Disclosure / Path Traversal - FIXED: validate path
 @app.route('/read_file')
 def read_file():
     filename = request.args.get('file', '')
+    base_dir = os.path.realpath('./files')
+    full_path = os.path.realpath(os.path.join(base_dir, filename))
+    # Prevent path traversal
+    if not full_path.startswith(base_dir):
+        return "Access denied", 403
     try:
-        # ⚠️ Unsafe path handling
-        with open(f"./files/{filename}", "r") as f:
-            return f"<pre>{f.read()}</pre>"
+        with open(full_path, "r") as f:
+            return f"<pre>{html.escape(f.read())}</pre>"
     except FileNotFoundError:
         return "File not found", 404
 
-# 6. Insecure Deserialization
-import pickle
+# 6. Insecure Deserialization - FIXED: use JSON instead of pickle
 @app.route('/deserialize', methods=['POST'])
 def deserialize():
-    data = request.data
     try:
-        obj = pickle.loads(data)  # ⚠️ Arbitrary code execution possible
+        obj = json.loads(request.data)
         return jsonify({"message": "Object loaded", "obj": str(obj)})
     except Exception as e:
         return str(e), 400
 
-# 7. CSRF (no protection at all)
+# 7. CSRF - Added basic auth check
 @app.route('/change_password', methods=['POST'])
 def change_password():
-    # ⚠️ No CSRF token, no auth check
+    auth = request.headers.get('Authorization')
+    if not auth:
+        return jsonify({"message": "Unauthorized"}), 401
     new_password = request.form.get('password', '')
     conn = get_db_connection()
     conn.execute("UPDATE users SET password=? WHERE id=1", (new_password,))
@@ -106,4 +117,4 @@ def change_password():
 # Run server
 # ------------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False)
