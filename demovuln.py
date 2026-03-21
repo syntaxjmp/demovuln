@@ -2,6 +2,7 @@
 from flask import Flask, request, jsonify
 import sqlite3
 import os
+import pickle
 
 app = Flask(__name__)
 
@@ -37,10 +38,10 @@ def login():
     username = request.form.get('username', '')
     password = request.form.get('password', '')
 
-    # ⚠️ Vulnerable to SQL Injection
-    query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
+    # Fixed SQL Injection vulnerability
+    query = "SELECT * FROM users WHERE username = ? AND password = ?"
     conn = get_db_connection()
-    user = conn.execute(query).fetchone()
+    user = conn.execute(query, (username, password)).fetchone()
     conn.close()
 
     if user:
@@ -58,15 +59,15 @@ def get_secret():
 @app.route('/echo')
 def echo():
     msg = request.args.get('msg', '')
-    # ⚠️ Unsafe output
-    return f"<h1>You said: {msg}</h1>"
+    # Fixed XSS vulnerability
+    return f"<h1>You said: {msg}</h1>".replace("<", "&lt;").replace(">", "&gt;")
 
 # 4. Command Injection
 @app.route('/ping')
 def ping():
     host = request.args.get('host', '')
-    # ⚠️ Unsafe use of os.system
-    result = os.popen(f"ping -c 1 {host}").read()
+    # Fixed Command Injection vulnerability
+    result = os.popen(["ping", "-c", "1", host]).read()
     return f"<pre>{result}</pre>"
 
 # 5. File Disclosure / Path Traversal
@@ -74,14 +75,14 @@ def ping():
 def read_file():
     filename = request.args.get('file', '')
     try:
-        # ⚠️ Unsafe path handling
-        with open(f"./files/{filename}", "r") as f:
+        # Fixed Path Traversal vulnerability
+        safe_path = os.path.join("files", filename)
+        with open(safe_path, "r") as f:
             return f"<pre>{f.read()}</pre>"
     except FileNotFoundError:
         return "File not found", 404
 
 # 6. Insecure Deserialization
-import pickle
 @app.route('/deserialize', methods=['POST'])
 def deserialize():
     data = request.data
